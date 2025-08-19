@@ -1,12 +1,42 @@
 import { headers } from "next/headers";
 
 import { auth } from "@/lib/auth";
+import type { Role } from "@/lib/authz";
 
 import SettingsCard from "./components/settings-card";
 
 export default async function Page() {
   const session = await auth.api.getSession({ headers: await headers() });
   console.log("Session:", session);
+
+  // Get role from Better Auth organization member
+  let userRole: Role | undefined;
+  let hasAdminAccess = false;
+
+  try {
+    // Get the user's active member information from Better Auth
+    const activeMember = await auth.api.getActiveMember({
+      headers: await headers(),
+    });
+    console.log("Active member inspect:", activeMember);
+
+    // getActiveMember returns a member object with role directly on it
+    if (activeMember?.role) {
+      const memberRole = Array.isArray(activeMember.role)
+        ? activeMember.role[0]
+        : activeMember.role;
+
+      userRole = memberRole as Role;
+      hasAdminAccess = userRole === "admin" || userRole === "owner";
+      console.log("User role:", userRole, "Has admin access:", hasAdminAccess);
+    } else {
+      console.log("No active member found or no role assigned");
+      // If no active member, user shouldn't even be on this page - redirect to sign in
+      // This is a critical auth issue if it happens
+    }
+  } catch (error) {
+    console.error("Error getting active member:", error);
+  }
 
   return (
     <main className="p-8">
@@ -21,7 +51,8 @@ export default async function Page() {
           href="/dashboard/settings/accountSettings"
         />
 
-        {session?.user?.role === "admin" && (
+        {/* Show admin settings only for users with proper permissions */}
+        {hasAdminAccess && (
           <SettingsCard
             title="Admin"
             description="Manage users, view logs, and configure application settings."

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { Suspense, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { JobFormDialog, JobTable } from "./_components";
 import { useJobForm } from "./_hooks/use-job-form";
 import { useJobsData } from "./_hooks/use-jobs-data";
 
-export default function JobsPage() {
+function JobsPageContent() {
   const searchParams = useSearchParams();
   const schedule = searchParams.get("schedule");
 
@@ -106,5 +106,13 @@ export default function JobsPage() {
         setSelectedCustomer={setSelectedCustomer}
       />
     </main>
+  );
+}
+
+export default function JobsPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <JobsPageContent />
+    </Suspense>
   );
 }

@@ -65,7 +65,7 @@ export async function createUserProfile(
       firstName: formData.firstName,
       lastName: formData.lastName,
       phone: formData.phoneNumber,
-      role: "user",
+      role: "owner", // Set as owner since they're creating an organization
       streetAddress: formData.address,
       city: formData.city,
       state: formData.state,
@@ -143,12 +143,14 @@ export async function createOrganization(
 
     console.log("Organization updated with business fields");
 
-    // Update the user's profile with the organization ID and change role to owner
+    // Update the user's profile with the organization ID
+    // Note: Better Auth automatically handles the "owner" role in the member table
+    // We only need to link the profile to the organization
     await db
       .update(profilesTable)
       .set({
-        organization: orgId, // Now this will be a text ID that matches better-auth
-        role: "owner",
+        organization: orgId, // Link profile to organization
+        // Remove role: "owner" - Better Auth handles this automatically
         updatedAt: new Date(),
       })
       .where(eq(profilesTable.id, session.user.id));
