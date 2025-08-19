@@ -2,144 +2,123 @@
 
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { z } from "zod";
 
-import type {
-  AddressSchema,
-  PersonalSchema,
-  ShopSchema,
-} from "@/app/onboarding/schema";
 import { db } from "@/db";
-import { profilesTable } from "@/db/app.schema";
-import { organization } from "@/db/auth.schema";
+import { organizationsTable, profilesTable } from "@/db/app.schema";
 import { auth } from "@/lib/auth";
 
-type ActionResponse<T = undefined> = {
-  success: boolean;
-  error?: string;
-  data?: T;
-};
+const personalInfoSchema = z.object({
+  firstName: z.string().min(1, "First name is required"),
+  lastName: z.string().min(1, "Last name is required"),
+  phone: z.string().optional(),
+});
 
-export async function createUserAccount(formData: {
-  email: string;
-  password: string;
-  firstName: string;
-  lastName: string;
-}): Promise<ActionResponse<{ userId: string }>> {
+const businessInfoSchema = z.object({
+  organizationName: z.string().min(1, "Organization name is required"),
+  industry: z.string().min(1, "Industry is required"),
+  organizationSize: z.string().min(1, "Organization size is required"),
+  website: z.string().url().optional().or(z.literal("")),
+  address: z.string().optional(),
+  phone: z.string().optional(),
+});
+
+export async function updatePersonalInfo(data: z.infer<typeof personalInfoSchema>) {
   try {
-    const authResponse = await auth.api.signUpEmail({
-      body: {
-        name: `${formData.firstName} ${formData.lastName}`,
-        email: formData.email,
-        password: formData.password,
-      },
-    });
+    const validatedData = personalInfoSchema.parse(data);
+    const session = await auth.api.getSession({ headers: await headers() });
 
-    if (!authResponse?.user?.id) {
-      throw new Error("Failed to create account");
+    if (!session?.user?.id) {
+      throw new Error("Unauthorized");
     }
 
-    return {
-      success: true,
-      data: { userId: authResponse.user.id },
-    };
-  } catch (error: unknown) {
-    console.error("Error creating account:", error);
-    return {
-      success: false,
-      error:
-        error instanceof Error ? error.message : "Failed to create account",
-    };
-  }
-}
+    // Update user profile
+    await db
+      .update(profilesTable)
+      .set({
+        firstName: validatedData.firstName,
+        lastName: validatedData.lastName,
+        phone: validatedData.phone,
+        updatedAt: new Date(),
+      })
+      .where(eq(profilesTable.id, session.user.id));
 
-export async function createUserProfile(
-  userId: string,
-  formData: PersonalSchema & AddressSchema,
-): Promise<ActionResponse> {
-  try {
-    await db.insert(profilesTable).values({
-      id: userId,
-      username: formData.username,
-      firstName: formData.firstName,
-      lastName: formData.lastName,
-      phone: formData.phoneNumber,
-      role: "user",
-      streetAddress: formData.address,
-      city: formData.city,
-      state: formData.state,
-      zipCode: formData.zipCode,
-      avatarUrl: formData.avatarUrl,
-    });
-
+    revalidatePath("/onboarding");
     return { success: true };
-  } catch (error: unknown) {
-    console.error("Error creating profile:", error);
+  } catch (error) {
+    console.error("Error updating personal info:", error);
     return {
       success: false,
-      error:
-        error instanceof Error ? error.message : "Failed to create profile",
+      error: error instanceof Error ? error.message : "Failed to update personal info",
     };
   }
 }
 
 export async function createOrganization(
-  data: ShopSchema,
-): Promise<ActionResponse<{ organizationId: string }>> {
+  personalData: z.infer<typeof personalInfoSchema>,
+  businessData: z.infer<typeof businessInfoSchema>,
+) {
   try {
-    const session = await auth.api.getSession({
-      headers: await headers(),
-    });
+    const validatedPersonal = personalInfoSchema.parse(personalData);
+    const validatedBusiness = businessInfoSchema.parse(businessData);
+    const session = await auth.api.getSession({ headers: await headers() });
 
-    if (!session?.user) {
-      throw new Error("User not authenticated");
+    if (!session?.user?.id) {
+      throw new Error("Unauthorized");
     }
 
-    console.log("Creating organization with data:", data);
+    console.log("Creating organization for user:", session.user.id);
 
-    // Generate slug from shop name
-    const slug = data.shopName
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "");
+    // Check if user already has an organization
+    const existingProfile = await db.query.profilesTable.findFirst({
+      where: eq(profilesTable.id, session.user.id),
+    });
 
-    // Create organization using better-auth with ONLY allowed fields
-    const orgResponse = await auth.api.createOrganization({
+    if (existingProfile?.organization) {
+      throw new Error("User already belongs to an organization");
+    }
+
+    // Create organization using Better Auth's organization API
+    const orgResult = await auth.api.createOrganization({
       headers: await headers(),
       body: {
-        name: data.shopName,
-        slug: slug,
-        logo: data.businessPhotoUrl || undefined,
+        name: validatedBusiness.organizationName,
+        slug: validatedBusiness.organizationName
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "-")
+          .replace(/-+/g, "-")
+          .replace(/^-|-$/g, ""),
       },
     });
 
-    console.log("Organization created:", orgResponse);
-
-    // Extract organization ID - handle different response structures
-    const orgId = orgResponse?.id;
-
-    if (!orgId) {
-      console.error("No organization ID returned:", orgResponse);
-      throw new Error("Failed to create organization - no ID returned");
+    if (!orgResult) {
+      throw new Error("Failed to create organization");
     }
 
-    console.log("Organization ID:", orgId);
+    console.log("Organization created:", orgResult);
 
-    // Update organization with business fields using direct DB query
+    // Get the organization ID from the response
+    const orgId = orgResult.id;
+
+    if (!orgId) {
+      throw new Error("Organization ID not returned from Better Auth");
+    }
+
+    // Update organizations table with business info
     await db
-      .update(organization)
+      .update(organizationsTable)
       .set({
-        businessName: data.shopName,
-        businessPhotoUrl: data.businessPhotoUrl || null,
-        streetAddress: data.streetAddress,
-        city: data.city,
-        state: data.state,
-        zipCode: data.zipCode,
-        phone: data.phone,
-        website: data.website || null,
+        industry: validatedBusiness.industry,
+        organizationSize: validatedBusiness.organizationSize,
+        website: validatedBusiness.website || null,
+        address: validatedBusiness.address || null,
+        phone: validatedBusiness.phone || null,
+        updatedAt: new Date(),
       })
-      .where(eq(organization.id, orgId));
+      .where(eq(organizationsTable.id, orgId));
 
     console.log("Organization updated with business fields");
 
@@ -151,16 +130,74 @@ export async function createOrganization(
       .set({
         organization: orgId, // Link profile to organization
         // Remove role: "owner" - Better Auth handles this automatically
+        firstName: validatedPersonal.firstName,
+        lastName: validatedPersonal.lastName,
+        phone: validatedPersonal.phone,
         updatedAt: new Date(),
       })
       .where(eq(profilesTable.id, session.user.id));
 
-    console.log("Profile updated successfully");
+    console.log("User profile updated with organization and personal info");
 
-    revalidatePath("/dashboard");
-    return { success: true };
+    revalidatePath("/onboarding");
+    redirect("/dashboard");
   } catch (error) {
     console.error("Error creating organization:", error);
-    throw error;
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to create organization",
+    };
+  }
+}
+
+export async function joinOrganization(inviteCode: string) {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+
+    if (!session?.user?.id) {
+      throw new Error("Unauthorized");
+    }
+
+    // Check if user already has an organization
+    const existingProfile = await db.query.profilesTable.findFirst({
+      where: eq(profilesTable.id, session.user.id),
+    });
+
+    if (existingProfile?.organization) {
+      throw new Error("User already belongs to an organization");
+    }
+
+    // Use Better Auth's acceptInvitation API
+    const result = await auth.api.acceptInvitation({
+      headers: await headers(),
+      body: {
+        invitationId: inviteCode,
+      },
+    });
+
+    if (!result) {
+      throw new Error("Invalid or expired invite code");
+    }
+
+    console.log("Successfully joined organization:", result);
+
+    // Better Auth automatically updates the membership
+    // We just need to update our profile table to link to the organization
+    await db
+      .update(profilesTable)
+      .set({
+        organization: result.organizationId,
+        updatedAt: new Date(),
+      })
+      .where(eq(profilesTable.id, session.user.id));
+
+    revalidatePath("/onboarding");
+    redirect("/dashboard");
+  } catch (error) {
+    console.error("Error joining organization:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to join organization",
+    };
   }
 }

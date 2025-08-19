@@ -1,17 +1,22 @@
 import { betterAuth } from "better-auth";
-import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { nextCookies } from "better-auth/next-js";
-import { admin, organization } from "better-auth/plugins";
+import { admin, nextCookies, organization } from "better-auth/plugins";
 
-import { db } from "@/db";
 import { env } from "@/env";
 
 export const auth = betterAuth({
-  baseUrl: env.BETTER_AUTH_URL,
+  database: {
+    provider: "sqlite",
+    url: env.DATABASE_URL,
+  },
   secret: env.BETTER_AUTH_SECRET,
-  database: drizzleAdapter(db, {
-    provider: "pg",
-  }),
+  baseURL: env.BETTER_AUTH_URL,
+  trustedOrigins: [env.BETTER_AUTH_URL.replace("/api/auth", "")],
+  session: {
+    cookieCache: {
+      enabled: true,
+      maxAge: 5 * 60, // Cache for 5 minutes
+    },
+  },
   emailAndPassword: {
     enabled: true,
     sendResetPassword: async ({ user, url }) => {
