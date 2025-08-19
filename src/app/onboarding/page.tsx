@@ -13,6 +13,8 @@ import { ReviewForm, ReviewInfo } from "@/app/onboarding/_components/review";
 import { ShopForm, ShopInfo } from "@/app/onboarding/_components/shop";
 import { cn } from "@/lib/utils";
 
+import { SubscriptionInfo, SubscriptionPage } from "./_components/subscription";
+
 const STEPS = {
   personal: {
     index: 0,
@@ -32,8 +34,14 @@ const STEPS = {
     infoComponent: <ShopInfo />,
     formComponent: <ShopForm />,
   },
-  review: {
+  subscription: {
     index: 3,
+    name: "Subscription",
+    infoComponent: <SubscriptionInfo />,
+    formComponent: <SubscriptionPage />,
+  },
+  review: {
+    index: 4,
     name: "Review",
     infoComponent: <ReviewInfo />,
     formComponent: <ReviewForm />,

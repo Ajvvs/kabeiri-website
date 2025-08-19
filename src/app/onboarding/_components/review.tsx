@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeftIcon, CheckCircle2Icon, XCircleIcon } from "lucide-react";
 
 import {
-  createOrganization,
+  createOrganizationWithCheckout,
   createUserAccount,
   createUserProfile,
 } from "@/app/onboarding/actions";
@@ -24,7 +24,8 @@ export function ReviewForm() {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [status, setStatus] = useState<SubmissionStatus>({});
-  const { personalInfo, addressInfo, shopInfo, reset } = useOnboardingStore();
+  const { personalInfo, addressInfo, shopInfo, subscriptionInfo, reset } =
+    useOnboardingStore();
 
   const handleSubmit = async () => {
     setIsSubmitting(true);
@@ -53,21 +54,36 @@ export function ReviewForm() {
       }
       setStatus((prev) => ({ ...prev, profile: true }));
 
-      // Step 3: Create organization if shop info exists
+      // Step 3: Create organization with checkout if shop info exists
       if (shopInfo.shopName) {
-        const orgResult = await createOrganization(shopInfo);
+        const orgResult = await createOrganizationWithCheckout({
+          ...shopInfo,
+          tier: subscriptionInfo.tier,
+          customerEmail: personalInfo.email,
+          customerName: `${personalInfo.firstName} ${personalInfo.lastName}`,
+        });
 
         if (!orgResult.success) {
           throw new Error(orgResult.error || "Failed to create organization");
         }
+
         setStatus((prev) => ({ ...prev, organization: true }));
+
+        // If checkout URL is provided (paid tier), redirect to checkout
+        if (orgResult.data?.checkoutUrl) {
+          // Clear the store before redirecting to checkout
+          reset();
+          // Redirect to Polar checkout
+          window.location.href = orgResult.data.checkoutUrl;
+          return; // Don't continue with normal flow
+        }
       }
 
       // Clear the store
       reset();
 
-      // Success! Redirect to dashboard
-      router.push("/dashboard");
+      // Success! Redirect to dashboard (Free tier or no organization)
+      router.push(`/dashboard`);
     } catch (error) {
       setStatus((prev) => ({
         ...prev,
@@ -190,6 +206,16 @@ export function ReviewForm() {
           </dl>
         </div>
       )}
+
+      <div className="rounded-lg border p-6 shadow-xs">
+        <h2 className="mb-4 text-lg font-medium">Subscription</h2>
+        <dl className="grid grid-cols-2 gap-4">
+          <div className="col-span-2">
+            <dt className="text-muted-foreground text-sm">Tier</dt>
+            <dd>{subscriptionInfo.tier}</dd>
+          </div>
+        </dl>
+      </div>
 
       {status.error && (
         <div className="bg-destructive/10 text-destructive rounded-lg p-4">

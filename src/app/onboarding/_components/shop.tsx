@@ -30,7 +30,7 @@ export function ShopForm() {
 
       // Navigate to review step
       const params = new URLSearchParams(searchParams);
-      params.set("step", "review");
+      params.set("step", "subscription");
       router.push(`?${params.toString()}`);
     });
   };

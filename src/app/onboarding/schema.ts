@@ -41,6 +41,11 @@ export const shopSchema = z.object({
   businessPhotoUrl: z.string().optional(),
 });
 
+export const subscriptionSchema = z.object({
+  tier: z.enum(["Free", "Pro", "Enterprise"]),
+});
+
 export type PersonalSchema = z.infer<typeof personalSchema>;
 export type AddressSchema = z.infer<typeof addressSchema>;
 export type ShopSchema = z.infer<typeof shopSchema>;
+export type SubscriptionSchema = z.infer<typeof subscriptionSchema>;
